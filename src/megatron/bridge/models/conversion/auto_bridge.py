@@ -859,16 +859,28 @@ class AutoBridge(Generic[MegatronModelT]):
 
         causal_lm_arch = None
         for architecture_name in architectures:
-            # TODO: Can we improve this?
+            # Check if it's a standard architecture or has a registered bridge
             if architecture_name.endswith(("ForCausalLM", "ForConditionalGeneration")):
                 causal_lm_arch = architecture_name
                 break
+            else:
+                # Check if there's a registered bridge for this architecture
+                try:
+                    from megatron.bridge.models.conversion.model_bridge import get_model_bridge
+                    get_model_bridge(architecture_name)
+                    # Bridge exists, use this architecture
+                    causal_lm_arch = architecture_name
+                    break
+                except NotImplementedError:
+                    # No bridge registered, continue checking
+                    continue
 
         if not causal_lm_arch:
             raise ValueError(
                 f"\n✗ No CausalLM architecture found\n\n"
                 f"Model architectures: {architectures}\n\n"
-                f"None of the architectures end with 'ForCausalLM' or 'ForConditionalGeneration'.\n"
+                f"None of the architectures end with 'ForCausalLM' or 'ForConditionalGeneration',\n"
+                f"and no registered bridge was found for these architectures.\n"
                 f"This bridge only supports causal language models.\n"
                 f"For other model types, use a different bridge class."
             )
@@ -893,18 +905,33 @@ class AutoBridge(Generic[MegatronModelT]):
 
     @classmethod
     def _validate_config(cls, config: PretrainedConfig, path: str | None = None) -> None:
-        # Check if this is a causal LM model
+        # Check if this is a causal LM model OR if there's a registered bridge
         if not cls.supports(config):
             architectures = getattr(config, "architectures", [])
-            raise ValueError(
-                f"\n✗ Model architecture not supported by AutoBridge\n\n"
-                f"Model: {path}\n"
-                f"Architectures: {architectures}\n\n"
-                f"AutoBridge only supports models with architectures ending in 'ForCausalLM' or 'ForConditionalGeneration'.\n"
-                f"Found architectures that don't match this pattern.\n\n"
-                f"If this is a different model type (e.g., Vision, Sequence-to-Sequence),\n"
-                f"you may need to use a different bridge class."
-            )
+
+            # Check if any architecture has a registered bridge
+            has_registered_bridge = False
+            for arch in architectures:
+                try:
+                    # Try to get a bridge for this architecture
+                    from megatron.bridge.models.conversion.model_bridge import get_model_bridge
+                    get_model_bridge(arch)
+                    has_registered_bridge = True
+                    break
+                except NotImplementedError:
+                    # No bridge registered for this architecture
+                    continue
+
+            if not has_registered_bridge:
+                raise ValueError(
+                    f"\n✗ Model architecture not supported by AutoBridge\n\n"
+                    f"Model: {path}\n"
+                    f"Architectures: {architectures}\n\n"
+                    f"AutoBridge only supports models with architectures ending in 'ForCausalLM' or 'ForConditionalGeneration'.\n"
+                    f"Found architectures that don't match this pattern and no registered bridge was found.\n\n"
+                    f"If this is a different model type (e.g., Vision, Sequence-to-Sequence),\n"
+                    f"you may need to use a different bridge class."
+                )
 
         # Check if we have an implementation for this specific architecture
         architecture = None
