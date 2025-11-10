@@ -37,9 +37,9 @@ from nemo_run import Plugin, Script, SlurmExecutor
 
 
 try:
-    from utils.utils import get_parallelism_defaults
+    from utils.utils import get_workload_base_config
 except (ImportError, ModuleNotFoundError):
-    from .utils.utils import get_parallelism_defaults
+    from .utils.utils import get_workload_base_config
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -326,8 +326,8 @@ class PerfEnvPlugin(Plugin):
             else:
                 raise NotImplementedError("PerfEnvPlugin is only supported for run.Script tasks")
 
-    def _set_vboost(self, executor: "run.Executor", enable_vboost: bool):
-        def get_vboost_srun_cmd(self, nodes, job_dir):
+    def _set_vboost(self, task: Union["run.Partial", "run.Script"], executor: "run.Executor", enable_vboost: bool):
+        def get_vboost_srun_cmd(nodes, job_dir):
             """Create the vboost `sudo nvidia-smi boost-slider --vboost 1` command"""
             import shlex
 
@@ -357,12 +357,12 @@ class PerfEnvPlugin(Plugin):
 
     def setup(self, task: Union["run.Partial", "run.Script"], executor: "run.Executor"):
         """Enable the performance environment settings"""
-        parallelism_defaults = get_parallelism_defaults(
-            self.model_name, self.model_size, self.gpu, self.num_gpus, self.compute_dtype, self.fp8_recipe
+        workload_base_config = get_workload_base_config(
+            self.model_name, self.model_size, self.gpu, self.compute_dtype, self.fp8_recipe
         )
-        tp_size = (self.tp_size if self.tp_size is not None else parallelism_defaults.tensor_model_parallel_size,)
-        pp_size = (self.pp_size if self.pp_size is not None else parallelism_defaults.pipeline_model_parallel_size,)
-        cp_size = (self.cp_size if self.cp_size is not None else parallelism_defaults.context_parallel_size,)
+        tp_size = self.tp_size if self.tp_size is not None else workload_base_config.tensor_model_parallel_size
+        pp_size = self.pp_size if self.pp_size is not None else workload_base_config.pipeline_model_parallel_size
+        cp_size = self.cp_size if self.cp_size is not None else workload_base_config.context_parallel_size
 
         # Force program order kernel launch for TP, CP overlap
         enable_deepep = self.gpu in ["h100"] and self.model_name == "deepseek" and self.model_size == "v3"
