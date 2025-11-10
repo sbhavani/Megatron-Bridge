@@ -19,13 +19,21 @@ Mixtral Supervised Fine-Tuning (SFT) with Megatron-Bridge.
 This script demonstrates how to fine-tune Mixtral models on instruction-following
 datasets using Megatron-Bridge with distributed training support.
 
+Supports both full fine-tuning and LoRA (Low-Rank Adaptation) for memory efficiency.
+
 Supported dataset formats:
     - Alpaca format: {"instruction": "...", "input": "...", "output": "..."}
     - ShareGPT format: {"conversations": [{"from": "human/gpt", "value": "..."}]}
     - Custom JSONL with instruction/response pairs
 
+LoRA Benefits:
+    - Freezes base model → No gradients for 47B parameters
+    - Only trains adapters → Tiny matrices (~10-100MB)
+    - Can use Adam → Adapter overhead is negligible
+    - Memory efficient: ~27-28GB per GPU (vs 34-41GB for full fine-tuning)
+
 Examples:
-    # Fine-tune from HuggingFace checkpoint (requires high memory)
+    # Full fine-tuning from HuggingFace checkpoint (requires high memory)
     torchrun --nproc_per_node=8 examples/mixtral/finetune_mixtral.py \\
         --hf_model_path="mistralai/Mixtral-8x7B-v0.1" \\
         --data_path=/path/to/instructions.jsonl \\
@@ -33,12 +41,16 @@ Examples:
         --expert_model_parallel_size=8 \\
         --train_iters=1000
 
-    # Fine-tune from pre-converted Megatron checkpoint (recommended)
-    torchrun --nproc_per_node=2 examples/mixtral/finetune_mixtral.py \\
+    # LoRA fine-tuning (memory-efficient, recommended for 2-4 GPUs)
+    torchrun --nproc_per_node=8 examples/mixtral/finetune_mixtral.py \\
         --load=/path/to/megatron/checkpoint \\
         --data_path=/path/to/instructions.jsonl \\
-        --output_path=/path/to/finetuned \\
+        --output_path=/path/to/lora_adapters \\
+        --use_lora \\
+        --lora_rank=16 \\
+        --lora_alpha=32 \\
         --tensor_model_parallel_size=2 \\
+        --expert_model_parallel_size=4 \\
         --train_iters=1000
 
     # Test with mock instruction data
@@ -296,6 +308,48 @@ def load_model(args):
     return provider
 
 
+def apply_lora(model, args):
+    """Apply LoRA adapters to model and freeze base parameters."""
+    print_rank_0("\n" + "=" * 80)
+    print_rank_0("Applying LoRA Adapters")
+    print_rank_0("=" * 80)
+    print_rank_0(f"LoRA Configuration:")
+    print_rank_0(f"  Rank: {args.lora_rank}")
+    print_rank_0(f"  Alpha: {args.lora_alpha}")
+    print_rank_0(f"  Dropout: {args.lora_dropout}")
+    print_rank_0(f"  Target modules: {args.lora_target_modules}")
+    print_rank_0("=" * 80 + "\n")
+
+    from megatron.bridge.peft.lora import LoRA
+
+    # Create LoRA configuration
+    lora_config = LoRA(
+        target_modules=args.lora_target_modules,
+        dim=args.lora_rank,
+        alpha=args.lora_alpha,
+        dropout=args.lora_dropout,
+    )
+
+    # Apply LoRA to the model
+    # The model is a list with one element (the actual model)
+    model_module = model[0]
+
+    # Freeze all base model parameters
+    for name, param in model_module.named_parameters():
+        param.requires_grad = False
+
+    # Apply LoRA adapters (this will add trainable parameters)
+    lora_config.apply(model_module)
+
+    # Count trainable parameters
+    total_params = sum(p.numel() for p in model_module.parameters())
+    trainable_params = sum(p.numel() for p in model_module.parameters() if p.requires_grad)
+
+    print_rank_0(f"Total parameters: {total_params:,}")
+    print_rank_0(f"Trainable parameters (LoRA): {trainable_params:,} ({100 * trainable_params / total_params:.2f}%)")
+    print_rank_0(f"Frozen parameters: {total_params - trainable_params:,} ({100 * (total_params - trainable_params) / total_params:.2f}%)\n")
+
+
 def get_dataloader(args, tokenizer):
     """Create dataloader for instruction-following data."""
     if args.mock_data:
@@ -448,6 +502,10 @@ def finetune(args):
         model[0].load_state_dict(checkpoint['model'])
         print_rank_0("✓ Checkpoint loaded successfully")
 
+    # Apply LoRA if requested
+    if args.use_lora:
+        apply_lora(model, args)
+
     # Load tokenizer
     tokenizer_path = args.hf_model_path if args.hf_model_path else "mistralai/Mixtral-8x7B-v0.1"
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
@@ -476,13 +534,16 @@ def finetune(args):
 
     # Training loop
     print_rank_0("\n" + "=" * 80)
-    print_rank_0("Starting Fine-Tuning")
+    training_mode = "LoRA Fine-Tuning" if args.use_lora else "Full Fine-Tuning"
+    print_rank_0(f"Starting {training_mode}")
     print_rank_0("=" * 80)
     print_rank_0(f"Total iterations: {args.train_iters}")
     print_rank_0(f"Micro batch size: {args.micro_batch_size}")
     print_rank_0(f"Global batch size: {args.global_batch_size}")
     print_rank_0(f"Learning rate: {args.lr}")
     print_rank_0(f"Mask instruction tokens: {args.mask_instruction}")
+    if args.use_lora:
+        print_rank_0(f"LoRA rank: {args.lora_rank}, alpha: {args.lora_alpha}")
     print_rank_0("=" * 80 + "\n")
 
     model[0].train()
@@ -598,11 +659,12 @@ def finetune(args):
 
     # Final save
     print_rank_0("\n" + "=" * 80)
-    print_rank_0("Fine-tuning complete!")
+    print_rank_0(f"{training_mode} complete!")
     print_rank_0("=" * 80)
     print_rank_0(f"Saving final checkpoint...")
     save_checkpoint(args, model, optimizer, iteration)
-    print_rank_0(f"Final checkpoint saved to: {args.output_path}")
+    checkpoint_type = "LoRA adapters" if args.use_lora else "model checkpoint"
+    print_rank_0(f"Final {checkpoint_type} saved to: {args.output_path}")
 
 
 def save_checkpoint(args, model, optimizer, iteration):
@@ -627,11 +689,23 @@ def save_checkpoint(args, model, optimizer, iteration):
 
         args_namespace = types.SimpleNamespace(**vars(args))
 
+        # For LoRA, only save LoRA parameters
+        if args.use_lora:
+            # Save only LoRA adapter parameters
+            lora_state_dict = {
+                name: param for name, param in model[0].named_parameters()
+                if param.requires_grad and 'lora' in name.lower()
+            }
+            model_state_dict = lora_state_dict
+            print_rank_0(f"  Saving {len(lora_state_dict)} LoRA adapter parameters")
+        else:
+            model_state_dict = model[0].state_dict()
+
         state_dict = {
             "args": args_namespace,
             "checkpoint_version": 3.0,
             "iteration": iteration,
-            "model": model[0].state_dict(),
+            "model": model_state_dict,
             "optimizer": optimizer.state_dict() if optimizer else None,
         }
 
@@ -651,7 +725,7 @@ def save_checkpoint(args, model, optimizer, iteration):
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Mixtral Supervised Fine-Tuning (SFT)",
+        description="Mixtral Supervised Fine-Tuning (SFT) with optional LoRA",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
@@ -686,6 +760,37 @@ def parse_args():
         action="store_true",
         default=True,
         help="Mask instruction tokens in loss (only compute loss on response)",
+    )
+
+    # LoRA arguments
+    parser.add_argument(
+        "--use_lora",
+        action="store_true",
+        help="Use LoRA (Low-Rank Adaptation) for memory-efficient fine-tuning",
+    )
+    parser.add_argument(
+        "--lora_rank",
+        type=int,
+        default=16,
+        help="LoRA rank (higher = more capacity, more memory). Only used with --use_lora",
+    )
+    parser.add_argument(
+        "--lora_alpha",
+        type=int,
+        default=32,
+        help="LoRA alpha scaling parameter. Only used with --use_lora",
+    )
+    parser.add_argument(
+        "--lora_dropout",
+        type=float,
+        default=0.1,
+        help="LoRA dropout rate. Only used with --use_lora",
+    )
+    parser.add_argument(
+        "--lora_target_modules",
+        nargs="+",
+        default=["linear_qkv", "linear_proj", "linear_fc1", "linear_fc2"],
+        help="Target modules for LoRA. Only used with --use_lora",
     )
 
     # Training arguments
