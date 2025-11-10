@@ -1,30 +1,57 @@
-# Mixtral 8x7B with Megatron-Bridge
+# Mixtral with Megatron-Bridge
 
-Examples for using Mixtral Mixture-of-Experts models with Megatron-Bridge.
+> **⚠️ MIGRATED TO RECIPE PATTERN**
+> The Mixtral training examples have been migrated to the modern recipe pattern.
+> **Please use:** [`examples/recipes/mixtral/`](../recipes/mixtral/)
 
-## Quick Start
+---
 
-### Prerequisites
+## 🚀 New Recipe-Based Examples (Recommended)
+
+All training and finetuning should now use the recipe pattern:
 
 ```bash
-pip install torch transformers megatron-core flash-attn
+# Pretraining with YAML + CLI overrides
+torchrun --nproc_per_node=8 examples/recipes/mixtral/pretrain_mixtral_8x7b.py \
+    --config-file conf/my_config.yaml \
+    model.expert_model_parallel_size=8
+
+# Finetuning with pretrained checkpoint
+torchrun --nproc_per_node=8 examples/recipes/mixtral/finetune_mixtral_8x7b.py \
+    --pretrained-checkpoint /path/to/ckpt \
+    --data-path /path/to/data.jsonl
 ```
+
+**Benefits of recipe pattern:**
+- ✅ YAML configuration support
+- ✅ Hydra-style CLI overrides
+- ✅ Type-safe configuration
+- ✅ 74% less code (413 vs 1,605 lines)
+- ✅ Consistent with all other models
+
+**Documentation:** See [`examples/recipes/mixtral/README.md`](../recipes/mixtral/README.md)
+
+---
+
+## Utilities (This Directory)
+
+This directory contains utility scripts for Mixtral models:
 
 ### Checkpoint Conversion
 
-For large models like Mixtral 8x7B, convert to Megatron format first to avoid OOM:
+Convert HuggingFace checkpoints to Megatron format for efficient loading:
 
 ```bash
 torchrun --nproc_per_node=2 examples/mixtral/convert_checkpoint.py \
     --hf_model_path="mistralai/Mixtral-8x7B-v0.1" \
     --output_path=/path/to/megatron/checkpoint \
-    --tensor_model_parallel_size=2
+    --tensor_model_parallel_size=2 \
+    --expert_model_parallel_size=4
 ```
 
-### Text Generation
+### Text Generation (Inference)
 
 **Single-GPU inference:**
-
 ```bash
 python examples/mixtral/generate_text.py \
     --hf_model_path="mistralai/Mixtral-8x7B-v0.1" \
@@ -32,115 +59,78 @@ python examples/mixtral/generate_text.py \
     --max_tokens=200
 ```
 
-**Multi-GPU with converted checkpoint:**
-
+**Multi-GPU with model parallelism:**
 ```bash
-torchrun --nproc_per_node=2 examples/mixtral/generate_text.py \
+torchrun --nproc_per_node=8 examples/mixtral/generate_text.py \
     --load=/path/to/megatron/checkpoint \
     --tensor_model_parallel_size=2 \
+    --expert_model_parallel_size=4 \
     --prompt="Explain quantum computing:" \
     --max_tokens=200
 ```
 
-### LoRA Fine-Tuning (Recommended for 2x A100 80GB)
+---
 
-LoRA is the recommended approach for fine-tuning Mixtral on limited hardware:
+## Migration Guide
 
+If you were using the old training scripts:
+
+### Old Approach (Deprecated)
 ```bash
-torchrun --nproc_per_node=2 examples/mixtral/finetune_mixtral_lora.py \
-    --load=/path/to/megatron/checkpoint \
-    --data_path=/path/to/instructions.jsonl \
-    --output_path=/path/to/lora/adapters \
-    --tensor_model_parallel_size=2 \
-    --train_iters=1000 \
-    --lora_rank=16 \
-    --lora_alpha=32 \
-    --seq_length=512
+# ❌ OLD: Manual argparse, no YAML support
+torchrun --nproc_per_node=8 examples/mixtral/train_mixtral.py \
+    --tensor-model-parallel-size=2 \
+    --expert-model-parallel-size=4 \
+    --train-iters=100000 \
+    --global-batch-size=32 \
+    --micro-batch-size=2 \
+    # ... 60+ more arguments
 ```
 
-**With mock data (for testing):**
-
+### New Approach (Recipe Pattern)
 ```bash
-torchrun --nproc_per_node=2 examples/mixtral/finetune_mixtral_lora.py \
-    --load=/path/to/megatron/checkpoint \
-    --mock_data \
-    --output_path=/path/to/lora/test \
-    --tensor_model_parallel_size=2 \
-    --train_iters=10
+# ✅ NEW: YAML configs + CLI overrides
+torchrun --nproc_per_node=8 examples/recipes/mixtral/pretrain_mixtral_8x7b.py \
+    --config-file conf/my_config.yaml \
+    model.tensor_model_parallel_size=2 \
+    model.expert_model_parallel_size=4 \
+    train.train_iters=100000
 ```
 
-**LoRA Benefits:**
-- Memory efficient: ~30-35GB per GPU vs ~75-80GB for full fine-tuning
-- Supports longer sequences (512+ tokens)
-- Can use Adam optimizer
-- Only trains small adapter matrices (~100MB)
+**See full migration guide:** [`examples/recipes/mixtral/README.md`](../recipes/mixtral/README.md#migration-from-legacy-scripts)
 
-## Hardware Requirements
+---
 
-### 2x A100 80GB
-- ✅ Checkpoint conversion
-- ✅ Generation/inference
-- ✅ **LoRA fine-tuning** (recommended)
-- ❌ Full pre-training (insufficient memory)
+## MoE-Specific Parallelism
 
-### 8x A100 80GB or 8x A40 48GB
-- ✅ All operations including full pre-training
-- Use configuration: TP=2, EP=4 or TP=4, EP=2
+Mixtral uses three types of parallelism:
 
-## Testing
+| Type | Flag | Description |
+|------|------|-------------|
+| **Tensor Parallel (TP)** | `tensor_model_parallel_size` | Splits tensors across GPUs |
+| **Pipeline Parallel (PP)** | `pipeline_model_parallel_size` | Splits layers across GPUs |
+| **Expert Parallel (EP)** | `expert_model_parallel_size` | Splits MoE experts across GPUs |
 
-Comprehensive test script for 2x A100:
+**Recommended for 8x A100 80GB:**
+- TP=2, PP=1, EP=4 (uses all 8 GPUs)
+- Enable `sequence_parallel=true` when TP > 1
 
-```bash
-bash examples/mixtral/test_2xa100_lora.sh
-```
+---
 
-This tests:
-1. Checkpoint conversion (HF → Megatron format)
-2. Basic generation verification
-3. LoRA fine-tuning with mock data
+## Files in This Directory
 
-## Files
+| File | Purpose | Status |
+|------|---------|--------|
+| `convert_checkpoint.py` | HF ↔ Megatron checkpoint conversion | ✅ Active |
+| `generate_text.py` | Text generation / inference | ✅ Active |
+| `sample_instructions.jsonl` | Sample instruction data | ✅ Active |
+| ~~`train_mixtral.py`~~ | ~~Pretraining~~ | ❌ Removed - Use recipe |
+| ~~`finetune_mixtral.py`~~ | ~~Finetuning~~ | ❌ Removed - Use recipe |
 
-- `convert_checkpoint.py` - HuggingFace ↔ Megatron checkpoint conversion
-- `generate_text.py` - Text generation and interactive chat
-- `finetune_mixtral_lora.py` - LoRA fine-tuning (recommended for limited hardware)
-- `train_mixtral.py` - Full pre-training (requires 8+ GPUs)
-- `test_2xa100_lora.sh` - Automated testing for 2x A100 setup
+---
 
-## Configuration
+## Additional Resources
 
-### Parallelism Options
-
-- `--tensor_model_parallel_size` (TP): Splits tensors across GPUs
-- `--pipeline_model_parallel_size` (PP): Splits layers across GPUs
-- `--expert_model_parallel_size` (EP): Splits MoE experts across GPUs
-
-### Recommended Configurations
-
-**2x A100 80GB:**
-```bash
---tensor_model_parallel_size=2 \
---expert_model_parallel_size=1
-```
-
-**8x A100 80GB:**
-```bash
---tensor_model_parallel_size=2 \
---expert_model_parallel_size=4
-```
-
-## Troubleshooting
-
-**OOM during conversion:**
-- Use CPU initialization (enabled by default in convert_checkpoint.py)
-- Convert with TP=1, use TP>1 at runtime
-
-**OOM during fine-tuning:**
-- Use LoRA instead of full fine-tuning
-- Reduce sequence length
-- Enable activation checkpointing: `--recompute_activations`
-
-**Slow performance:**
-- Ensure flash-attn is installed: `pip install flash-attn`
-- Use expert parallelism for multi-GPU: `--expert_model_parallel_size=N`
+- **Recipe Examples:** [`examples/recipes/mixtral/`](../recipes/mixtral/)
+- **Recipe Module:** [`src/megatron/bridge/recipes/mixtral/`](../../src/megatron/bridge/recipes/mixtral/)
+- **YAML Configs:** [`examples/recipes/mixtral/conf/`](../recipes/mixtral/conf/)
