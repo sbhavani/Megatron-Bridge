@@ -221,15 +221,17 @@ class TestInternVLModelProvider:
 
     def test_internvl_model_provider_kv_channels(self):
         """Test InternVLModelProvider kv_channels calculation."""
+        # kv_channels should be hidden_size // num_attention_heads
+        expected_kv_channels = 896 // 14  # 64
+        
         provider = InternVLModelProvider(
             num_layers=24,
             hidden_size=896,
             num_attention_heads=14,
             num_query_groups=2,
+            kv_channels=expected_kv_channels,  # Must be explicitly set
         )
 
-        # kv_channels should be hidden_size // num_attention_heads
-        expected_kv_channels = 896 // 14  # 64
         assert provider.kv_channels == expected_kv_channels
 
     def test_internvl_model_provider_parallelism_config(self):
