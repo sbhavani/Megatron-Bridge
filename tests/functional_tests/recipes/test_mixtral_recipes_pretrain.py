@@ -38,6 +38,7 @@ MIXTRAL_PRETRAIN_RECIPES = [
             "tensor_model_parallel_size": 1,  # Reduce from 4 to 1 for 2 GPUs
             "pipeline_model_parallel_size": 1,  # Reduce from 2 to 1 for 2 GPUs
             "expert_model_parallel_size": 2,  # Keep EP=2 to test MoE
+            "sequence_parallel": False,  # Disable SP when TP=1
         },
         {"num_layers": 2},  # Use minimal layers for testing
     ),
