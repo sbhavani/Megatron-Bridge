@@ -101,7 +101,7 @@ class TestInternVLConversion:
         # Create InternVL config from the toy model config
         from transformers import AutoConfig
 
-        config = AutoConfig.for_model(model_type="internvl_chat", **HF_INTERNVL_TOY_MODEL_CONFIG)
+        config = AutoConfig.for_model(**HF_INTERNVL_TOY_MODEL_CONFIG)
         config.torch_dtype = torch.bfloat16  # Explicitly set the torch_dtype in config
 
         # Create model with random weights and convert to bfloat16
