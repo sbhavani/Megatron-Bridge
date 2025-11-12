@@ -283,7 +283,9 @@ def default_collate_fn(examples: list, processor) -> dict[str, torch.Tensor]:
             torch.arange(seq_len, device=batch["input_ids"].device).unsqueeze(0).expand(batch_size, -1)
         )
 
-    batch["pixel_values"] = batch["pixel_values"].to(torch.bfloat16)
+    # Convert pixel_values to bfloat16 if present (may not exist for text-only samples)
+    if "pixel_values" in batch:
+        batch["pixel_values"] = batch["pixel_values"].to(torch.bfloat16)
     labels = batch["input_ids"].clone()[:, 1:]
     labels = torch.cat([labels, -100 * torch.ones_like(labels[:, :1])], dim=1)
     labels[torch.isin(labels, skipped_tokens)] = -100
