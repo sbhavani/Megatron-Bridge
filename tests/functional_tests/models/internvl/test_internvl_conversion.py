@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 import torch
+from transformers.models.internvl.configuration_internvl import InternVLConfig
 
 
 HF_INTERNVL_TOY_MODEL_CONFIG = {
@@ -99,19 +100,18 @@ class TestInternVLConversion:
         model_dir = temp_dir / "internvl_toy"
 
         # Create InternVL config from the toy model config
-        from transformers import AutoConfig
+        from transformers import AutoModelForVision2Seq
 
-        config = AutoConfig.for_model(**HF_INTERNVL_TOY_MODEL_CONFIG)
+        # Create config directly using InternVLConfig
+        config = InternVLConfig(**HF_INTERNVL_TOY_MODEL_CONFIG)
         config.torch_dtype = torch.bfloat16  # Explicitly set the torch_dtype in config
 
         # Create model with random weights and convert to bfloat16
         try:
-            from transformers import AutoModelForVision2Seq
-
             model = AutoModelForVision2Seq.from_config(config)
-        except Exception:
+        except Exception as e:
             # If the specific model class isn't available, skip this test
-            pytest.skip("InternVL model class not available in transformers")
+            pytest.skip(f"InternVL model class not available in transformers: {e}")
 
         model = model.bfloat16()
 
@@ -120,18 +120,35 @@ class TestInternVLConversion:
             print(f"Before save - {name}: {param.dtype}")
             break  # Just check the first parameter
 
-        # Download and save processor
-        try:
-            from transformers import AutoProcessor
+        # Create minimal processor files (no network needed)
+        # The conversion test doesn't actually use these, but they need to exist
+        preprocessor_config = {
+            "do_convert_rgb": True,
+            "do_normalize": True,
+            "do_rescale": True,
+            "do_resize": True,
+            "image_mean": [0.5, 0.5, 0.5],
+            "image_processor_type": "InternVLImageProcessor",
+            "image_std": [0.5, 0.5, 0.5],
+            "processor_class": "InternVLProcessor",
+            "rescale_factor": 0.00392156862745098,
+            "size": {"height": 448, "width": 448},
+        }
+        
+        tokenizer_config = {
+            "tokenizer_class": "Qwen2Tokenizer",
+            "vocab_size": 151936,
+            "bos_token": "<|endoftext|>",
+            "eos_token": "<|endoftext|>",
+            "pad_token": "<|endoftext|>",
+            "unk_token": "<|endoftext|>",
+        }
 
-            processor = AutoProcessor.from_pretrained("OpenGVLab/InternVL2-1B", trust_remote_code=True)
-        except Exception:
-            # Fallback to a generic processor
-            from transformers import AutoProcessor
-
-            processor = AutoProcessor.from_pretrained("google/siglip-base-patch16-224")
-
-        processor.save_pretrained(model_dir)
+        with open(model_dir / "preprocessor_config.json", "w") as f:
+            json.dump(preprocessor_config, f, indent=2)
+        
+        with open(model_dir / "tokenizer_config.json", "w") as f:
+            json.dump(tokenizer_config, f, indent=2)
 
         # Save model and config to directory
         model.save_pretrained(model_dir, safe_serialization=True)
