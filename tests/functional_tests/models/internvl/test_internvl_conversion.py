@@ -164,11 +164,8 @@ class TestInternVLConversion:
         with open(model_dir / "tokenizer_config.json", "w") as f:
             json.dump(tokenizer_config, f, indent=2)
 
-        # Also save config.json explicitly to ensure compatibility with correct torch_dtype
-        config_to_save = HF_INTERNVL_TOY_MODEL_CONFIG.copy()
-        config_path = model_dir / "config.json"
-        with open(config_path, "w") as f:
-            json.dump(config_to_save, f, indent=2)
+        # Note: config.json was already saved by model.save_pretrained() above
+        # Do NOT overwrite it - it has the properly serialized nested configs
 
         # Create minimal model weights file if none exists
         weights_file = model_dir / "model.safetensors"
