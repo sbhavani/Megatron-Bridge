@@ -101,8 +101,20 @@ class TestInternVLConversion:
         model_dir = temp_dir / "internvl_toy"
 
         # Create InternVL config from the toy model config
-        # Create config directly using InternVLConfig
-        config = InternVLConfig(**HF_INTERNVL_TOY_MODEL_CONFIG)
+        # InternVLConfig needs properly instantiated sub-configs
+        from transformers import Qwen2Config
+        from transformers.models.internvl.configuration_internvl import InternVLVisionConfig
+        
+        # Create sub-configs
+        llm_config = Qwen2Config(**HF_INTERNVL_TOY_MODEL_CONFIG["llm_config"])
+        vision_config = InternVLVisionConfig(**HF_INTERNVL_TOY_MODEL_CONFIG["vision_config"])
+        
+        # Create main config without nested dicts, then set the config objects
+        config_dict = {k: v for k, v in HF_INTERNVL_TOY_MODEL_CONFIG.items() 
+                       if k not in ["llm_config", "vision_config"]}
+        config = InternVLConfig(**config_dict)
+        config.llm_config = llm_config
+        config.vision_config = vision_config
         config.torch_dtype = torch.bfloat16  # Explicitly set the torch_dtype in config
 
         # Create model with random weights and convert to bfloat16
