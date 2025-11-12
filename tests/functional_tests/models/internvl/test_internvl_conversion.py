@@ -158,6 +158,20 @@ class TestInternVLConversion:
         with open(config_path, "w") as f:
             json.dump(config_to_save, f, indent=2)
 
+        # Create minimal model weights file if none exists
+        weights_file = model_dir / "model.safetensors"
+        if not weights_file.exists():
+            weights_file = model_dir / "pytorch_model.bin"
+            if not weights_file.exists():
+                # Create a minimal weights file for testing
+                # InternVL has language model and vision components
+                minimal_weights = {
+                    "language_model.model.embed_tokens.weight": torch.randn(151936, 896, dtype=torch.bfloat16),
+                    "language_model.model.norm.weight": torch.randn(896, dtype=torch.bfloat16),
+                    "vision_model.embeddings.class_embedding": torch.randn(512, dtype=torch.bfloat16),
+                }
+                torch.save(minimal_weights, weights_file)
+
         return str(model_dir)
 
     def test_toy_model_creation(self, internvl_toy_model_path):
