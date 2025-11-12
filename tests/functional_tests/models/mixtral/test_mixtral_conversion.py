@@ -72,7 +72,7 @@ class TestMixtralConversion:
         # Create Mixtral config from the toy model config
         from transformers import AutoConfig, MixtralForCausalLM
 
-        config = AutoConfig.for_model(model_type="mixtral", **HF_MIXTRAL_TOY_MODEL_CONFIG)
+        config = AutoConfig.for_model(**HF_MIXTRAL_TOY_MODEL_CONFIG)
         config.torch_dtype = torch.bfloat16  # Explicitly set the torch_dtype in config
 
         # Create model with random weights and convert to bfloat16
