@@ -27,7 +27,7 @@ from megatron.bridge.models.internvl.modeling_internvl import InternVLModel
 from megatron.bridge.models.hf_pretrained.vlm import PreTrainedVLM
 
 
-@MegatronModelBridge.register_bridge(source="InternVLChatModel", target=InternVLModel)
+@MegatronModelBridge.register_bridge(source="InternVLModel", target=InternVLModel)
 class InternVLBridge(MegatronModelBridge):
     """Megatron Bridge for InternVL vision-language models."""
 

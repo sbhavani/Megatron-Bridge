@@ -23,7 +23,7 @@ from transformers.models.internvl.configuration_internvl import InternVLConfig
 
 
 HF_INTERNVL_TOY_MODEL_CONFIG = {
-    "architectures": ["InternVLChatModel"],
+    "architectures": ["InternVLModel"],  # Standard transformers class name
     "attention_dropout": 0.0,
     "bos_token_id": 151643,
     "eos_token_id": 151645,
