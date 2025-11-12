@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 import torch
+from transformers import InternVLModel
 from transformers.models.internvl.configuration_internvl import InternVLConfig
-from transformers.models.internvl.modeling_internvl import InternVLChatModel
 
 
 HF_INTERNVL_TOY_MODEL_CONFIG = {
@@ -107,7 +107,7 @@ class TestInternVLConversion:
 
         # Create model with random weights and convert to bfloat16
         try:
-            model = InternVLChatModel(config)
+            model = InternVLModel(config)
         except Exception as e:
             # If the specific model class isn't available, skip this test
             pytest.skip(f"InternVL model class not available in transformers: {e}")
