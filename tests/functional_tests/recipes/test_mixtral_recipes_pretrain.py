@@ -34,7 +34,11 @@ MIXTRAL_PRETRAIN_RECIPES = [
     (
         mixtral_8x22b_pretrain_config,
         "mixtral_8x22b",
-        {"expert_model_parallel_size": 2},  # Reduce EP for test
+        {
+            "tensor_model_parallel_size": 1,  # Reduce from 4 to 1 for 2 GPUs
+            "pipeline_model_parallel_size": 1,  # Reduce from 2 to 1 for 2 GPUs
+            "expert_model_parallel_size": 2,  # Keep EP=2 to test MoE
+        },
         {"num_layers": 2},  # Use minimal layers for testing
     ),
 ]
