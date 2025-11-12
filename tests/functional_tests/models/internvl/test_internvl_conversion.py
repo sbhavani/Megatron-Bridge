@@ -119,6 +119,9 @@ class TestInternVLConversion:
             print(f"Before save - {name}: {param.dtype}")
             break  # Just check the first parameter
 
+        # Save model and config to directory first (this creates model_dir)
+        model.save_pretrained(model_dir, safe_serialization=True)
+
         # Create minimal processor files (no network needed)
         # The conversion test doesn't actually use these, but they need to exist
         preprocessor_config = {
@@ -148,9 +151,6 @@ class TestInternVLConversion:
         
         with open(model_dir / "tokenizer_config.json", "w") as f:
             json.dump(tokenizer_config, f, indent=2)
-
-        # Save model and config to directory
-        model.save_pretrained(model_dir, safe_serialization=True)
 
         # Also save config.json explicitly to ensure compatibility with correct torch_dtype
         config_to_save = HF_INTERNVL_TOY_MODEL_CONFIG.copy()
