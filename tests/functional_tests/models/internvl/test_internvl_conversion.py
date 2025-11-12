@@ -32,7 +32,7 @@ HF_INTERNVL_TOY_MODEL_CONFIG = {
     "hidden_act": "silu",
     "initializer_range": 0.02,
     "max_position_embeddings": 4096,
-    "model_type": "internvl_chat",
+    "model_type": "internvl",  # Use 'internvl' not 'internvl_chat' for AutoConfig compatibility
     "rms_norm_eps": 1e-06,
     "tie_word_embeddings": False,
     "torch_dtype": "bfloat16",
@@ -203,7 +203,7 @@ class TestInternVLConversion:
         with open(config_file) as f:
             config_data = json.load(f)
 
-        assert config_data["model_type"] == "internvl_chat"
+        assert config_data["model_type"] == "internvl"
         assert config_data["llm_config"]["hidden_size"] == 896
         assert config_data["llm_config"]["num_hidden_layers"] == 2
         assert config_data["vision_config"]["hidden_size"] == 512
@@ -296,7 +296,7 @@ class TestInternVLConversion:
             with open(config_file) as f:
                 saved_config = json.load(f)
 
-            assert saved_config["model_type"] == "internvl_chat", "Model type should be internvl_chat"
+            assert saved_config["model_type"] == "internvl", "Model type should be internvl"
             # Verify InternVL-specific parameters
             assert saved_config["select_layer"] == -1, "select_layer should match"
             assert saved_config["ps_version"] == "v2", "ps_version should match"
