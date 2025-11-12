@@ -20,6 +20,7 @@ import random
 import shutil
 import sys
 import threading
+import types
 from enum import Enum, auto
 from logging import getLogger
 from pathlib import Path
@@ -551,6 +552,7 @@ def save_checkpoint(
         optim_sd_kwargs=dict(metadata=sharded_sd_metadata),
         model_sd_kwargs=dict(metadata=sharded_sd_metadata),
         rerun_state=rerun_state,
+        cfg=cfg,
     )
 
     # Apply PEFT filtering to save adapter-only checkpoints
@@ -1018,6 +1020,43 @@ def _generate_model_state_dict(
     return state_dict
 
 
+def _build_megatron_lm_args_from_config(cfg: "ConfigContainer") -> types.SimpleNamespace:
+    """Convert Megatron Bridge ConfigContainer to Megatron-LM compatible args object.
+
+    This function creates an args object that is compatible with Megatron-LM's checkpoint
+    loading code, which expects specific attributes like tensor_model_parallel_size, etc.
+
+    Args:
+        cfg: The Megatron Bridge ConfigContainer.
+
+    Returns:
+        A SimpleNamespace object with Megatron-LM compatible attributes.
+    """
+    args = types.SimpleNamespace()
+
+    # Parallelism settings
+    args.tensor_model_parallel_size = cfg.model.tensor_model_parallel_size
+    args.pipeline_model_parallel_size = cfg.model.pipeline_model_parallel_size
+    args.encoder_tensor_model_parallel_size = getattr(cfg.model, 'encoder_tensor_model_parallel_size', 0)
+    args.encoder_pipeline_model_parallel_size = getattr(cfg.model, 'encoder_pipeline_model_parallel_size', 0)
+
+    # Calculate world size and data parallel size
+    if torch.distributed.is_initialized():
+        args.world_size = torch.distributed.get_world_size()
+        args.data_parallel_size = mpu.get_data_parallel_world_size()
+    else:
+        args.world_size = 1
+        args.data_parallel_size = 1
+
+    # Checkpoint settings (note: Megatron-LM uses negated flags)
+    args.no_save_optim = not cfg.checkpoint.save_optim
+    args.no_save_rng = not cfg.checkpoint.save_rng
+    args.ckpt_fully_parallel_save = cfg.checkpoint.fully_parallel_save
+    args.ckpt_format = cfg.checkpoint.ckpt_format
+
+    return args
+
+
 def generate_state_dict(
     ckpt_cfg: CheckpointConfig,
     model: list[MegatronModule],
@@ -1028,11 +1067,12 @@ def generate_state_dict(
     optim_sd_kwargs: Optional[dict[str, Any]] = None,
     model_sd_kwargs: Optional[dict[str, Any]] = None,
     rerun_state: Optional[dict[str, Any]] = None,
+    cfg: Optional["ConfigContainer"] = None,
 ) -> dict[str, Any]:
     """Generate the state dictionary to be saved in a checkpoint.
 
     Args:
-        cfg: The configuration container.
+        ckpt_cfg: The checkpoint configuration.
         model: The model module(s).
         optimizer: The optimizer instance.
         opt_param_scheduler: The optimizer parameter scheduler instance.
@@ -1041,12 +1081,18 @@ def generate_state_dict(
         optim_sd_kwargs: Additional keyword arguments for optimizer state dict generation.
         model_sd_kwargs: Metadata for model state dict generation.
         rerun_state: State dictionary from the rerun state machine.
+        cfg: The full configuration container (optional, for Megatron-LM compatibility).
 
     Returns:
         A dictionary containing the complete state to be saved.
     """
     # Arguments, iteration, and model.
     state_dict = {}
+
+    # Add Megatron-LM compatible args for checkpoint compatibility
+    if cfg is not None:
+        state_dict["args"] = _build_megatron_lm_args_from_config(cfg)
+
     state_dict["checkpoint_version"] = 3.0
     if iteration is not None:
         state_dict["iteration"] = iteration
@@ -1428,6 +1474,7 @@ def _load_checkpoint_from_path(
                 optim_sd_kwargs=optim_sd_kwargs,
                 model_sd_kwargs=model_sd_kwargs,
                 rerun_state=gen_sd_rerun_state,
+                cfg=cfg,
             )
 
     elif ckpt_format == "fsdp_dtensor":
@@ -1488,6 +1535,7 @@ def _load_checkpoint_from_path(
             optim_sd_kwargs=optim_sd_kwargs,
             rerun_state=gen_sd_rerun_state,
             iteration=1,
+            cfg=cfg,
         )
         # Store model reference for preprocessing during load
         state_dict["_model"] = model
