@@ -131,6 +131,53 @@ def get_checkpoint_version() -> Optional[float]:
     return _CHECKPOINT_VERSION
 
 
+def remove_extra_state_from_sharded_state_dict(sharded_state_dict):
+    """Remove _extra_state keys from a sharded state dict before loading.
+    
+    This prevents validation errors when resharding checkpoints, as _extra_state
+    ShardedObjects cannot be properly resharded across different parallelism configs.
+    
+    The _extra_state typically contains TransformerEngine metadata (attention backend
+    configuration, RNG state for dropout, etc.) that is not needed for weight-only
+    checkpoint loading/conversion.
+    
+    Args:
+        sharded_state_dict: The sharded state dictionary to modify
+        
+    Returns:
+        The modified sharded state dictionary with _extra_state keys removed
+    """
+    if not isinstance(sharded_state_dict, dict):
+        return sharded_state_dict
+    
+    total_removed = 0
+    
+    # Handle both single model and pipeline parallel cases (model0, model1, etc.)
+    if "model" in sharded_state_dict:
+        # Single model case
+        target_dicts = [("model", sharded_state_dict["model"])]
+    else:
+        # Pipeline parallel case: look for model0, model1, etc.
+        target_dicts = [(k, v) for k, v in sharded_state_dict.items() if k.startswith("model")]
+    
+    for dict_name, target_dict in target_dicts:
+        if not hasattr(target_dict, "keys"):
+            continue
+        
+        # Find and remove all _extra_state keys
+        keys_to_remove = [key for key in list(target_dict.keys()) if "_extra_state" in key]
+        
+        for key in keys_to_remove:
+            del target_dict[key]
+        
+        total_removed += len(keys_to_remove)
+    
+    if total_removed > 0:
+        print_rank_0(f"Removed {total_removed} _extra_state entries from sharded_state_dict to avoid resharding issues")
+    
+    return sharded_state_dict
+
+
 def delete_extra_state(state_dict):
     """Delete all extra state keys from the model state dictionary.
 
@@ -1173,6 +1220,11 @@ def _load_model_weights_from_checkpoint(
 
     model = unwrap_model(model)
     sharded_state_dict = _generate_model_state_dict(model, model_sd_kwargs)
+    
+    # Remove _extra_state from sharded_state_dict before loading to avoid resharding validation errors.
+    # _extra_state contains training metadata (e.g., TE attention config, RNG state) that's not needed
+    # for weight-only loading and cannot be resharded like ShardedTensor weights.
+    sharded_state_dict = remove_extra_state_from_sharded_state_dict(sharded_state_dict)
 
     load_strategy = get_default_load_sharded_strategy(checkpoint_path)
     if fully_parallel_load:
