@@ -15,15 +15,7 @@ from megatron.core.transformer.transformer_layer import TransformerLayer
 from megatron.core.process_groups_config import ProcessGroupCollection
 
 from megatron.bridge.models.falcon_h1.parallel_hybrid_layer import ParallelHybridLayer
-
-
-# Layer type symbols
-class LayerSymbols:
-    MAMBA = "M"
-    ATTENTION = "*"
-    MLP = "-"
-    PARALLEL = "P"
-    VALID = {MAMBA, ATTENTION, MLP, PARALLEL}
+from megatron.bridge.models.falcon_h1.layer_utils import LayerType
 
 
 def allocate_hybrid_layers(
@@ -59,35 +51,35 @@ def allocate_hybrid_layers(
                 f"total layers {total_layers_count}"
             )
         for symbol in layer_type_list:
-            if symbol not in LayerSymbols.VALID:
+            if symbol not in LayerType.VALID:
                 raise ValueError(f"Invalid symbol '{symbol}' in override pattern")
         return layer_type_list
 
     # Auto-allocate based on ratios
-    layer_type_list = [LayerSymbols.MAMBA] * total_layers_count
+    layer_type_list = [LayerType.MAMBA] * total_layers_count
 
     # Allocate attention layers
     attention_count = round(total_layers_count * target_attention_ratio)
     if attention_count > 0:
         for i in range(attention_count):
             idx = int(i * total_layers_count / attention_count)
-            layer_type_list[idx] = LayerSymbols.ATTENTION
+            layer_type_list[idx] = LayerType.ATTENTION
 
     # Allocate MLP layers
     mlp_count = round(total_layers_count * target_mlp_ratio)
     if mlp_count > 0:
-        available_indices = [i for i, t in enumerate(layer_type_list) if t == LayerSymbols.MAMBA]
+        available_indices = [i for i, t in enumerate(layer_type_list) if t == LayerType.MAMBA]
         for i in range(min(mlp_count, len(available_indices))):
             idx = available_indices[i]
-            layer_type_list[idx] = LayerSymbols.MLP
+            layer_type_list[idx] = LayerType.MLP
 
     # Allocate parallel hybrid layers
     parallel_count = round(total_layers_count * target_parallel_hybrid_ratio)
     if parallel_count > 0:
-        available_indices = [i for i, t in enumerate(layer_type_list) if t == LayerSymbols.MAMBA]
+        available_indices = [i for i, t in enumerate(layer_type_list) if t == LayerType.MAMBA]
         for i in range(min(parallel_count, len(available_indices))):
             idx = available_indices[i]
-            layer_type_list[idx] = LayerSymbols.PARALLEL
+            layer_type_list[idx] = LayerType.PARALLEL
 
     return layer_type_list
 
@@ -196,28 +188,28 @@ class HybridMambaStack(MambaStack):
         pp_layer_offset = 0
 
         for i, layer_type in enumerate(layer_type_list):
-            if layer_type == LayerSymbols.MAMBA:
+            if layer_type == LayerType.MAMBA:
                 layer = build_module(
                     submodules.mamba_layer,
                     config=self.config,
                     layer_number=i + 1 + pp_layer_offset,
                     pg_collection=pg_collection,
                 )
-            elif layer_type == LayerSymbols.ATTENTION:
+            elif layer_type == LayerType.ATTENTION:
                 layer = build_module(
                     submodules.attention_layer,
                     config=self.config,
                     layer_number=i + 1 + pp_layer_offset,
                     pg_collection=pg_collection,
                 )
-            elif layer_type == LayerSymbols.MLP:
+            elif layer_type == LayerType.MLP:
                 layer = build_module(
                     submodules.mlp_layer,
                     config=self.config,
                     layer_number=i + 1 + pp_layer_offset,
                     pg_collection=pg_collection,
                 )
-            elif layer_type == LayerSymbols.PARALLEL:
+            elif layer_type == LayerType.PARALLEL:
                 # Build parallel hybrid layer
                 layer = build_module(
                     self.parallel_hybrid_layer_spec,
