@@ -14,18 +14,11 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Callable, Literal, Optional, Union
+from typing import Callable, Optional, Union
 
-import torch
-from megatron.core import parallel_state
-from megatron.core.models.mamba import MambaModel as MCoreMambaModel
 from megatron.core.transformer import ModuleSpec
-from megatron.core.transformer.enums import AttnBackend
 
-from megatron.bridge.models.model_provider import ModelProviderMixin
-from megatron.bridge.models.transformer_config import TransformerConfig
-from megatron.bridge.utils.common_utils import get_rank_safe
-from megatron.bridge.utils.vocab_utils import calculate_padded_vocab_size
+from megatron.bridge.models.mamba.mamba_provider import MambaModelProvider
 from megatron.bridge.models.falcon_h1.falcon_h1_layer_specs import get_falcon_h1_mamba_stack_spec
 
 
@@ -46,87 +39,58 @@ def get_default_falcon_h1_stack_spec():
 
 
 @dataclass
-class FalconH1ModelProvider(TransformerConfig, ModelProviderMixin[MCoreMambaModel]):
+class FalconH1ModelProvider(MambaModelProvider):
     """Configuration and provider for Falcon H1 hybrid models.
 
     Falcon H1 uses a hybrid architecture with alternating layers:
     - Even layers (0, 2, 4, ...): ParallelHybridLayer (Mamba mixer + Self-attention in parallel)
     - Odd layers (1, 3, 5, ...): MLP-only layers
 
-    This provider extends TransformerConfig with Falcon H1-specific parameters and
-    provides a method to instantiate configured Falcon H1 models.
+    This provider inherits from MambaModelProvider and overrides Falcon H1-specific defaults.
     """
 
-    # Model configuration
-    fp16_lm_cross_entropy: bool = False
-    parallel_output: bool = True
-    share_embeddings_and_output_weights: bool = False
-    params_dtype: torch.dtype = torch.bfloat16
-    fp16: bool = False
-    bf16: bool = True
-    num_layers: int = 2
-
-    # Mamba-specific parameters
+    # Override Mamba defaults for Falcon H1
     mamba_num_groups: int = 1
     mamba_state_dim: int = 128
     mamba_head_dim: int = 64
 
-    # Attention parameters (for hybrid layers)
+    # Attention parameters (for hybrid layers) - Falcon H1 uses attention unlike pure Mamba
     num_attention_heads: int = 8
     num_query_groups: int = 1  # GQA
 
-    # Hybrid architecture ratios
-    # For Falcon H1: alternating parallel hybrid + MLP layers
-    hybrid_attention_ratio: float = 0.0
+    # Hybrid architecture ratios - Falcon H1 specific pattern
+    hybrid_attention_ratio: float = 0.0  # No standalone attention layers
     hybrid_mlp_ratio: float = 0.5  # Half of layers are MLP-only
-    parallel_hybrid_ratio: float = 0.5  # Half of layers are parallel hybrid
+    parallel_hybrid_ratio: float = 0.5  # Half of layers are parallel hybrid (Mamba+Attention)
     hybrid_override_pattern: Optional[str] = None
 
-    # Position embeddings
-    seq_length: int = 8192
-    position_embedding_type: Literal["learned_absolute", "rope", "none"] = "rope"
-    rotary_percent: float = 1.0
+    # Position embeddings - Falcon H1 uses RoPE unlike pure Mamba
+    position_embedding_type: str = "rope"
     rotary_base: int = 10000
-    seq_len_interpolation_factor: Optional[float] = None
-    apply_rope_fusion: bool = True
 
-    # Normalization and activations
-    normalization: str = "RMSNorm"
-    layernorm_epsilon: float = 1e-5
-    gated_linear_unit: bool = True  # SwiGLU
-
-    # Biases
-    add_bias_linear: bool = False
-
-    # Dropout
-    hidden_dropout: float = 0.0
-    attention_dropout: float = 0.0
-
-    # Attention backend
-    attention_backend: AttnBackend = AttnBackend.flash
-
-    # Other configs
-    make_vocab_size_divisible_by: int = 128
-    deallocate_pipeline_outputs: bool = True
-    bias_dropout_fusion: bool = True
-    cross_entropy_loss_fusion: bool = True
+    # Use Falcon H1-specific stack spec instead of default Mamba spec
     mamba_stack_spec: Union[ModuleSpec, Callable[[], ModuleSpec]] = get_default_falcon_h1_stack_spec
-    vocab_size: Optional[int] = None
-    should_pad_vocab: bool = False
-    hf_model_id: Optional[str] = None
-    """Optional HuggingFace model identifier associated with this provider."""
 
-    def provide(self, pre_process=None, post_process=None, vp_stage=None) -> MCoreMambaModel:
-        """Configure and instantiate a Megatron Core Mamba model based on this configuration.
+    # Note: All other fields (gated_linear_unit, normalization, etc.) are inherited from MambaModelProvider
+    # with their appropriate defaults
+
+    def provide(self, pre_process=None, post_process=None, vp_stage=None):
+        """Configure and instantiate a Mamba model with Falcon H1 architecture.
+
+        Overrides parent to pass parallel_hybrid_ratio to HybridMambaStack.
 
         Args:
-            pre_process: Whether to include pre-processing in the model, defaults to first pipeline stage
-            post_process: Whether to include post-processing in the model, defaults to last pipeline stage
+            pre_process: Whether to include pre-processing in the model
+            post_process: Whether to include post-processing in the model
             vp_stage: Virtual pipeline stage
 
         Returns:
-            MCoreMambaModel: Configured Megatron Core Mamba model instance
+            MCoreMambaModel: Configured Megatron Core Mamba model with HybridMambaStack
         """
+        from megatron.core import parallel_state
+        from megatron.core.models.mamba import MambaModel as MCoreMambaModel
+        from megatron.bridge.utils.vocab_utils import calculate_padded_vocab_size
+
         mamba_stack_spec = self.mamba_stack_spec
         if not isinstance(mamba_stack_spec, ModuleSpec):
             mamba_stack_spec = mamba_stack_spec()
@@ -144,6 +108,7 @@ class FalconH1ModelProvider(TransformerConfig, ModelProviderMixin[MCoreMambaMode
         else:
             padded_vocab_size = self.vocab_size
 
+        # Call with parallel_hybrid_ratio for HybridMambaStack
         return MCoreMambaModel(
             self,
             mamba_stack_spec=mamba_stack_spec,
@@ -151,7 +116,7 @@ class FalconH1ModelProvider(TransformerConfig, ModelProviderMixin[MCoreMambaMode
             max_sequence_length=self.seq_length,
             hybrid_attention_ratio=self.hybrid_attention_ratio,
             hybrid_mlp_ratio=self.hybrid_mlp_ratio,
-            parallel_hybrid_ratio=self.parallel_hybrid_ratio,
+            parallel_hybrid_ratio=self.parallel_hybrid_ratio,  # Falcon H1 specific
             hybrid_override_pattern=self.hybrid_override_pattern,
             fp16_lm_cross_entropy=self.fp16_lm_cross_entropy,
             parallel_output=self.parallel_output,
