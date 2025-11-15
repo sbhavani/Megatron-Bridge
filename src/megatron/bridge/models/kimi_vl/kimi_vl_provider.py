@@ -17,7 +17,7 @@ from typing import Any
 
 from megatron.core.models.gpt import GPTModel as MCoreGPTModel
 
-from megatron.bridge.models.deepseek import DeepSeekV3ModelProvider
+from megatron.bridge.models.gpt_provider import GPTModelProvider
 
 from .modeling_kimi_vl import KimiVLModel
 
@@ -28,11 +28,12 @@ from .modeling_kimi_vl import KimiVLModel
 
 
 @dataclass
-class KimiVLModelProvider(DeepSeekV3ModelProvider):
+class KimiVLModelProvider(GPTModelProvider):
     """
     Base model provider for Kimi VL Models.
 
-    Kimi VL is based on DeepSeek V3 architecture with vision-language capabilities.
+    Kimi VL is a multimodal vision-language model from Moonshot AI.
+    The language model component will be determined from the HuggingFace config during conversion.
     """
 
     # VL models shouldn't scatter embeddings across sequence parallel regions because
