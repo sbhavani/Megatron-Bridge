@@ -177,14 +177,34 @@ class KimiVLModel(MegatronModule):
                         inputs_embeds = self._merge_with_image_features(inputs_embeds, input_ids, image_features)
             else:
                 # Handle case with no images - add dummy image features for stability
-                # This matches the ms-swift implementation
+                # This matches the ms-swift implementation to ensure vision tower gets gradient flow
+                # even for text-only batches, preventing unused parameter issues in distributed training
                 if hasattr(self, 'vision_tower') and hasattr(self, '_extract_image_features'):
                     try:
-                        from PIL import Image
-                        dummy_image = Image.new('RGB', (32, 32), (0, 0, 0))
-                        # Process dummy image - implementation specific to the actual model
-                        pass
-                    except ImportError:
+                        # Create a dummy black image and process it
+                        # The result is added with zero weight to maintain gradient flow
+                        dummy_pixel_values = torch.zeros(
+                            (1, 3, 32, 32),
+                            dtype=inputs_embeds.dtype,
+                            device=inputs_embeds.device
+                        )
+                        dummy_grid_hws = torch.tensor([[32, 32]], dtype=torch.long, device=inputs_embeds.device)
+
+                        # Extract dummy features (vision tower forward pass)
+                        dummy_pixel_values = dummy_pixel_values.to(
+                            self.vision_tower.dtype if hasattr(self.vision_tower, 'dtype') else inputs_embeds.dtype
+                        )
+                        dummy_features = self._extract_image_features(dummy_pixel_values, dummy_grid_hws)
+
+                        # Add dummy features with zero weight: inputs_embeds + dummy_features.mean() * 0.0
+                        # This ensures vision tower parameters get gradients without affecting the output
+                        if isinstance(dummy_features, torch.Tensor):
+                            inputs_embeds = inputs_embeds + dummy_features.mean() * 0.0
+                        elif isinstance(dummy_features, (list, tuple)) and len(dummy_features) > 0:
+                            inputs_embeds = inputs_embeds + dummy_features[0].mean() * 0.0
+                    except Exception:
+                        # Silently skip if dummy image processing fails
+                        # This can happen if vision tower isn't properly initialized yet
                         pass
 
             # Convert back to [decoder_seq_len, b, h_language]
