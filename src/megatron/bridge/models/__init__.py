@@ -101,6 +101,10 @@ from megatron.bridge.models.llama_nemotron import (
     LlamaNemotronBridge,
     LlamaNemotronHeterogeneousProvider,
 )
+from megatron.bridge.models.falcon_h1 import (
+    FalconH1ModelProvider,
+    FalconH1ModelProvider1B,
+)
 from megatron.bridge.models.mamba.mamba_provider import (
     MambaModelProvider,
     MambaModelProvider1P3B,
@@ -243,6 +247,8 @@ __all__ = [
     "Llama31Nemotron70BProvider",
     "Llama31NemotronUltra253BProvider",
     "Llama33NemotronSuper49BProvider",
+    "FalconH1ModelProvider",
+    "FalconH1ModelProvider1B",
     "MistralModelProvider",
     "MistralSmall3ModelProvider24B",
     "OlMoEBridge",
