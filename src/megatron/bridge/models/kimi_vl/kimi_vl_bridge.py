@@ -20,10 +20,9 @@ from megatron.bridge.models.conversion.mapping_registry import MegatronMappingRe
 from megatron.bridge.models.conversion.model_bridge import MegatronModelBridge
 from megatron.bridge.models.conversion.param_mapping import (
     AutoMapping,
-    GatedMLPMapping,
-    QKVMapping,
     ReplicatedMapping,
 )
+from megatron.bridge.models.deepseek.common import get_common_configs, get_common_mapping_list
 from megatron.bridge.models.hf_pretrained.vlm import PreTrainedVLM
 from megatron.bridge.models.kimi_vl.kimi_vl_provider import KimiVLModelProvider
 from megatron.bridge.models.kimi_vl.modeling_kimi_vl import KimiVLModel
@@ -50,97 +49,91 @@ class KimiVLBridge(MegatronModelBridge):
         hf_config = hf_pretrained.config
 
         # Get text/language model config
-        # Kimi VL wraps the language model, so we need to extract its config
+        # Kimi VL wraps a DeepSeek V3-based language model (Moonlight), so extract its config
         text_config = getattr(hf_config, "text_config", hf_config)
 
-        provider = KimiVLModelProvider(
-            # Basic transformer config
-            num_layers=text_config.num_hidden_layers,
-            hidden_size=text_config.hidden_size,
-            ffn_hidden_size=text_config.intermediate_size,
-            num_attention_heads=text_config.num_attention_heads,
-            num_query_groups=getattr(text_config, "num_key_value_heads", text_config.num_attention_heads),
-            init_method_std=text_config.initializer_range,
-            layernorm_epsilon=getattr(text_config, "rms_norm_eps", 1e-6),
-            gated_linear_unit=True,
-            make_vocab_size_divisible_by=self.make_vocab_size_divisible_by(text_config.vocab_size),
-            rotary_base=getattr(text_config, "rope_theta", 10000.0),
-            share_embeddings_and_output_weights=getattr(text_config, "tie_word_embeddings", False),
-            vocab_size=text_config.vocab_size,
-            seq_length=getattr(text_config, "max_position_embeddings", 4096),
-            # Precision config
-            fp16=(self.dtype_from_hf(hf_config, default=torch.float32) == torch.float16),
-            bf16=(self.dtype_from_hf(hf_config, default=torch.float32) == torch.bfloat16),
-            params_dtype=self.dtype_from_hf(hf_config, default=torch.float32),
-            generation_config=hf_pretrained.generation_config,
-            # VL-specific configs
-            vision_config=getattr(hf_config, "vision_config", None),
-            # VL-specific token IDs
-            bos_token_id=getattr(hf_config, "bos_token_id", 0),
-            eos_token_id=getattr(hf_config, "eos_token_id", 1),
-            vision_start_token_id=getattr(hf_config, "vision_start_token_id", 151652),
-            vision_end_token_id=getattr(hf_config, "vision_end_token_id", 151653),
-            image_token_id=getattr(hf_config, "image_token_id", 151655),
-        )
+        # Create a mock object to pass to get_common_configs
+        # This allows us to reuse DeepSeek V3 config extraction for the language model
+        class MockTextModel:
+            def __init__(self, cfg, gen_cfg):
+                self.config = cfg
+                self.generation_config = gen_cfg
 
+        mock_text_model = MockTextModel(text_config, hf_pretrained.generation_config)
+        configs = get_common_configs(mock_text_model)
+
+        # Add precision configs
+        configs["fp16"] = self.dtype_from_hf(hf_config, default=torch.float32) == torch.float16
+        configs["bf16"] = self.dtype_from_hf(hf_config, default=torch.float32) == torch.bfloat16
+        configs["params_dtype"] = self.dtype_from_hf(hf_config, default=torch.float32)
+
+        # Add VL-specific configs
+        configs["vision_config"] = getattr(hf_config, "vision_config", None)
+
+        # VL-specific token IDs
+        configs["bos_token_id"] = getattr(hf_config, "bos_token_id", 0)
+        configs["eos_token_id"] = getattr(hf_config, "eos_token_id", 1)
+        configs["vision_start_token_id"] = getattr(hf_config, "vision_start_token_id", 151652)
+        configs["vision_end_token_id"] = getattr(hf_config, "vision_end_token_id", 151653)
+        configs["image_token_id"] = getattr(hf_config, "image_token_id", 151655)
+
+        # DeepSeek V3 / Moonlight specific configs
+        configs["make_vocab_size_divisible_by"] = 1280
+        configs["moe_router_score_function"] = "sigmoid"
+        configs["moe_router_enable_expert_bias"] = True
+        if hasattr(text_config, "aux_loss_alpha"):
+            configs["moe_aux_loss_coeff"] = text_config.aux_loss_alpha
+
+        provider = KimiVLModelProvider(**configs)
         return provider
 
     def mapping_registry(self) -> MegatronMappingRegistry:
-        # Dictionary maps Megatron parameter names -> HF parameter names
-        # Kimi VL wraps the language model with vision components
-        param_mappings = {
-            # Language model embeddings and output
-            "language_model.embedding.word_embeddings.weight": "language_model.model.embed_tokens.weight",
-            "language_model.output_layer.weight": "language_model.lm_head.weight",
-            "language_model.decoder.final_layernorm.weight": "language_model.model.norm.weight",
-            # Layer-specific mappings
-            "language_model.decoder.layers.*.self_attention.linear_qkv.layer_norm_weight": (
-                "language_model.model.layers.*.input_layernorm.weight"
-            ),
-            "language_model.decoder.layers.*.mlp.linear_fc1.layer_norm_weight": (
-                "language_model.model.layers.*.post_attention_layernorm.weight"
-            ),
-            "language_model.decoder.layers.*.self_attention.linear_proj.weight": (
-                "language_model.model.layers.*.self_attn.o_proj.weight"
-            ),
-            "language_model.decoder.layers.*.mlp.linear_fc2.weight": "language_model.model.layers.*.mlp.down_proj.weight",
-        }
+        # Start with DeepSeek V3 common mappings for the language model
+        # Then prefix them with "language_model." since Kimi VL wraps the LM
+        mapping_list = get_common_mapping_list()
 
-        mapping_list = []
-        # Add parameter mappings
-        for megatron_param, hf_param in param_mappings.items():
-            mapping_list.append(AutoMapping(megatron_param=megatron_param, hf_param=hf_param))
+        # Prefix all language model mappings with "language_model."
+        # Kimi VL structure: language_model.{deepseek_param} -> language_model.{hf_param}
+        prefixed_mappings = []
+        for mapping in mapping_list:
+            if hasattr(mapping, 'megatron_param') and hasattr(mapping, 'hf_param'):
+                # For AutoMapping
+                if isinstance(mapping.hf_param, str):
+                    new_mapping = AutoMapping(
+                        megatron_param=f"language_model.{mapping.megatron_param}",
+                        hf_param=f"language_model.{mapping.hf_param}",
+                    )
+                    prefixed_mappings.append(new_mapping)
+                elif isinstance(mapping.hf_param, dict):
+                    # For special mappings like QKV, MLP
+                    # Need to prefix each component
+                    from megatron.bridge.models.conversion.param_mapping import GatedMLPMapping
 
-        # Add special mappings for vision components and complex transformations
-        mapping_list.extend(
-            [
-                # Vision tower - replicate all parameters
-                ReplicatedMapping(
-                    megatron_param="vision_tower.**",
-                    hf_param="vision_tower.**",
-                ),
-                # Multi-modal projector - replicate all parameters
-                ReplicatedMapping(
-                    megatron_param="multi_modal_projector.**",
-                    hf_param="multi_modal_projector.**",
-                ),
-                # QKV: Combine separate Q, K, V matrices into single QKV matrix
-                QKVMapping(
-                    megatron_param="language_model.decoder.layers.*.self_attention.linear_qkv.weight",
-                    q="language_model.model.layers.*.self_attn.q_proj.weight",
-                    k="language_model.model.layers.*.self_attn.k_proj.weight",
-                    v="language_model.model.layers.*.self_attn.v_proj.weight",
-                ),
-                # Gated MLP: Combine gate and up projection matrices into single FC1 matrix
-                GatedMLPMapping(
-                    megatron_param="language_model.decoder.layers.*.mlp.linear_fc1.weight",
-                    gate="language_model.model.layers.*.mlp.gate_proj.weight",
-                    up="language_model.model.layers.*.mlp.up_proj.weight",
-                ),
-            ]
-        )
+                    new_hf_params = {k: f"language_model.{v}" for k, v in mapping.hf_param.items()}
+                    new_mapping = type(mapping)(
+                        megatron_param=f"language_model.{mapping.megatron_param}",
+                        **new_hf_params
+                    )
+                    prefixed_mappings.append(new_mapping)
+            else:
+                # Just prefix the params we can
+                prefixed_mappings.append(mapping)
 
-        return MegatronMappingRegistry(*mapping_list)
+        # Add vision-specific mappings
+        prefixed_mappings.extend([
+            # Vision tower - replicate all parameters
+            ReplicatedMapping(
+                megatron_param="vision_tower.**",
+                hf_param="vision_tower.**",
+            ),
+            # Multi-modal projector - replicate all parameters
+            ReplicatedMapping(
+                megatron_param="multi_modal_projector.**",
+                hf_param="multi_modal_projector.**",
+            ),
+        ])
+
+        return MegatronMappingRegistry(*prefixed_mappings)
 
     def post_conversion_hook(self, megatron_model: KimiVLModel, hf_model):
         """
