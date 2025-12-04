@@ -35,25 +35,31 @@ docker run --rm -it -w /workdir -v $(pwd):/workdir \
 
 ### 📦 Local Installation with UV
 
-For local development, install using [uv](https://docs.astral.sh/uv/):
+Install from PyPI using [uv](https://docs.astral.sh/uv/):
 
 ```bash
 # Install uv if not already installed
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Clone and install
-git clone https://github.com/NVIDIA-NeMo/Megatron-Bridge.git
-cd Megatron-Bridge
-uv pip install -e .
+# Install Megatron Bridge
+uv pip install megatron-bridge
 ```
 
 **Optional dependencies:**
 ```bash
 # For Mamba model architectures
-uv pip install -e ".[mamba]"
+uv pip install "megatron-bridge[mamba]"
 
 # For NeMo Run recipes
-uv pip install -e ".[recipes]"
+uv pip install "megatron-bridge[recipes]"
+```
+
+**Development installation:**
+```bash
+# Clone and install in editable mode
+git clone https://github.com/NVIDIA-NeMo/Megatron-Bridge.git
+cd Megatron-Bridge
+uv pip install -e .
 ```
 
 > **Note:** Installation requires Python development headers (`sudo apt-get install python3-dev`). Some packages like `transformer-engine` may take 8-15 minutes to build from source. See the [Contribution guide](https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/main/CONTRIBUTING.md) for detailed installation instructions and known issues.
