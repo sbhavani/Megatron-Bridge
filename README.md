@@ -35,28 +35,34 @@ docker run --rm -it -w /workdir -v $(pwd):/workdir \
 
 ### 📦 Local Installation with UV
 
-Install using [uv](https://docs.astral.sh/uv/):
+Install from PyPI using [uv](https://docs.astral.sh/uv/):
 
 ```bash
 # Install uv if not already installed
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Clone and install (recommended - see note below)
-git clone https://github.com/NVIDIA-NeMo/Megatron-Bridge.git
-cd Megatron-Bridge
-uv pip install -e .
+# Install Megatron Bridge
+uv pip install megatron-bridge
 ```
 
 **Optional dependencies:**
 ```bash
 # For Mamba model architectures
-uv pip install -e ".[mamba]"
+uv pip install "megatron-bridge[mamba]"
 
 # For NeMo Run recipes
-uv pip install -e ".[recipes]"
+uv pip install "megatron-bridge[recipes]"
 ```
 
-> **Note:** Direct PyPI installation (`uv pip install megatron-bridge`) currently fails due to a dependency issue with `nv-grouped-gemm` (see [known issues](https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/main/CONTRIBUTING.md#known-installation-issues)). Install from source as shown above until the next release. Installation requires Python development headers (`sudo apt-get install python3-dev`). The base installation includes `transformer-engine` which takes ~10 minutes to build from source. Installing `[mamba]` extras adds `mamba-ssm` and `causal-conv1d` which take an additional ~27 minutes to build.
+**Development installation:**
+```bash
+# Clone and install in editable mode
+git clone https://github.com/NVIDIA-NeMo/Megatron-Bridge.git
+cd Megatron-Bridge
+uv pip install -e .
+```
+
+> **Note:** Installation requires Python development headers (`sudo apt-get install python3-dev`). The base installation includes `transformer-engine` which takes ~10 minutes to build from source. Installing `[mamba]` extras adds `mamba-ssm` and `causal-conv1d` which take an additional ~27 minutes to build. See the [Contribution guide](https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/main/CONTRIBUTING.md) for detailed installation instructions and known issues.
 
 ## ⚡ Quickstart
 
