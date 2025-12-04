@@ -64,8 +64,6 @@ uv pip install -e .
 
 > **Note:** Installation requires Python development headers (`sudo apt-get install python3-dev`). The base installation includes `transformer-engine` which takes ~10 minutes to build from source. Installing `[mamba]` extras adds `mamba-ssm` and `causal-conv1d` which take an additional ~27 minutes to build. See the [Contribution guide](https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/main/CONTRIBUTING.md) for detailed installation instructions and known issues.
 
-For development installation and additional details, please refer to our [Contribution guide](https://github.com/NVIDIA-NeMo/Megatron-Bridge/blob/main/CONTRIBUTING.md).
-
 ## ⚡ Quickstart
 
 To get started, install Megatron Bridge or download a NeMo Framework container as described [above](#-installation).
