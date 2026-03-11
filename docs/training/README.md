@@ -4,6 +4,11 @@ This directory contains comprehensive documentation for training and customizing
 
 ## Quick Navigation
 
+### Hands-on tutorials
+
+- [Ultra-Scale Parallelism Runbook](../../tutorials/training/ultra_scale_parallelism.ipynb)
+- [Reduced Precision Training](../../tutorials/training/reduced_precision_training.ipynb)
+
 ### I want to
 
 **🚀 Get started with training**
