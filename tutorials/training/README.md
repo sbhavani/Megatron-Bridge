@@ -11,3 +11,4 @@ This directory contains hands-on Megatron Bridge training notebooks.
 
 - The ultra-scale runbook uses Qwen3 recipes as concrete examples, but the notebook is intended as a general guide to Megatron parallelism and training workflow design.
 - The notebook uses mock data and short runs so you can validate topology and runtime behavior before plugging in a real dataset.
+- For GPU-specific performance numbers and starting configurations, see the [Megatron Bridge performance summary](https://docs.nvidia.com/nemo/megatron-bridge/latest/performance-summary.html).
