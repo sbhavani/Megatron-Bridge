@@ -4,7 +4,7 @@ This directory contains hands-on Megatron Bridge training notebooks.
 
 ## Available Tutorials
 
-- [Ultra-Scale Parallelism Runbook](ultra_scale_parallelism.ipynb): a practical multi-GPU walkthrough of data parallelism, tensor parallelism, pipeline parallelism, context parallelism, activation recomputation, communication overlap, checkpointing, and Hugging Face export using Megatron Bridge recipes.
+- [Ultra-Scale Parallelism Runbook](ultra_scale_parallelism.ipynb): a practical multi-GPU walkthrough of data parallelism, tensor parallelism, pipeline parallelism, context parallelism, activation recomputation, communication overlap, checkpointing, and resume workflows using Megatron Bridge recipes.
 - [Reduced Precision Training](reduced_precision_training.ipynb): a focused notebook on mixed-precision training behavior.
 
 ## Notes
